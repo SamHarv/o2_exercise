@@ -1,21 +1,17 @@
+import 'package:o2_exercise/data/models/set_model.dart';
+
 class ExerciseModel {
   /// [ExerciseModel] class to represent an exercise.
 
   final String id;
   String name;
-  int sets;
-  int reps;
-  int weightKG;
-  int restSeconds;
+  List<SetModel> sets;
   int position;
 
   ExerciseModel({
     required this.id,
     required this.name,
-    this.sets = 0,
-    this.reps = 0,
-    this.weightKG = 0,
-    this.restSeconds = 0,
+    this.sets = const [],
     this.position = 0,
   });
 
@@ -24,22 +20,11 @@ class ExerciseModel {
       id: json['id'],
       name: json['name'],
       sets: json['sets'],
-      reps: json['reps'],
-      weightKG: json['weightKG'],
-      restSeconds: json['restSeconds'],
       position: json['position'],
     );
   }
 
   Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'name': name,
-      'sets': sets,
-      'reps': reps,
-      'weightKG': weightKG,
-      'restSeconds': restSeconds,
-      'position': position,
-    };
+    return {'id': id, 'name': name, 'sets': sets, 'position': position};
   }
 }

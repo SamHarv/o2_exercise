@@ -3,6 +3,7 @@ import 'package:path/path.dart';
 import 'dart:async';
 import '../models/exercise_model.dart';
 import '../models/session_model.dart';
+import '../models/set_model.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -20,7 +21,12 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    return await openDatabase(path, version: 1, onCreate: _createDB);
+    return await openDatabase(
+      path,
+      version: 2,
+      onCreate: _createDB,
+      onUpgrade: _upgradeDB,
+    );
   }
 
   Future _createDB(Database db, int version) async {
@@ -33,10 +39,6 @@ class DatabaseHelper {
     CREATE TABLE exercises (
       id $idType,
       name $textType,
-      sets $integerType,
-      reps $integerType,
-      weightKG $integerType,
-      restSeconds $integerType,
       position $integerType
     )
     ''');
@@ -62,63 +64,306 @@ class DatabaseHelper {
       FOREIGN KEY (exercise_id) REFERENCES exercises (id) ON DELETE CASCADE
     )
     ''');
+
+    // Create sets table to store individual sets for exercises
+    await db.execute('''
+    CREATE TABLE sets (
+      id $idType,
+      exercise_id TEXT NOT NULL,
+      order_num $integerType,
+      reps $integerType,
+      weight $integerType,
+      rest $integerType,
+      FOREIGN KEY (exercise_id) REFERENCES exercises (id) ON DELETE CASCADE
+    )
+    ''');
+  }
+
+  Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Create sets table if upgrading from version 1
+      await db.execute('''
+      CREATE TABLE sets (
+        id TEXT PRIMARY KEY,
+        exercise_id TEXT NOT NULL,
+        order_num INTEGER NOT NULL,
+        reps INTEGER NOT NULL,
+        weight INTEGER NOT NULL,
+        rest INTEGER NOT NULL,
+        FOREIGN KEY (exercise_id) REFERENCES exercises (id) ON DELETE CASCADE
+      )
+      ''');
+
+      // Modify exercises table structure to remove columns moved to sets
+      await db.execute('''
+      CREATE TABLE exercises_new (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        position INTEGER NOT NULL
+      )
+      ''');
+
+      // Copy relevant data from old table to new table
+      await db.execute('''
+      INSERT INTO exercises_new (id, name, position)
+      SELECT id, name, position FROM exercises
+      ''');
+
+      // Drop old table and rename new one
+      await db.execute('DROP TABLE exercises');
+      await db.execute('ALTER TABLE exercises_new RENAME TO exercises');
+    }
   }
 
   // CRUD operations for ExerciseModel
 
   Future<String> createExercise(ExerciseModel exercise) async {
     final db = await instance.database;
-    await db.insert('exercises', exercise.toJson());
+
+    await db.transaction((txn) async {
+      // Insert exercise
+      await txn.insert('exercises', {
+        'id': exercise.id,
+        'name': exercise.name,
+        'position': exercise.position,
+      });
+
+      // Insert sets for this exercise
+      for (var s in exercise.sets) {
+        await txn.insert('sets', {
+          'id': s.id,
+          'exercise_id': exercise.id,
+          'order_num': s.order,
+          'reps': s.reps,
+          'weight': s.weight,
+          'rest': s.restSeconds,
+        });
+      }
+    });
+
     return exercise.id;
   }
 
   Future<ExerciseModel> readExercise(String id) async {
     final db = await instance.database;
-    final maps = await db.query(
+
+    // Get exercise data
+    final exerciseMaps = await db.query(
       'exercises',
-      columns: [
-        'id',
-        'name',
-        'sets',
-        'reps',
-        'weightKG',
-        'restSeconds',
-        'position',
-      ],
+      columns: ['id', 'name', 'position'],
       where: 'id = ?',
       whereArgs: [id],
     );
 
-    if (maps.isNotEmpty) {
-      return ExerciseModel.fromJson(maps.first);
-    } else {
+    if (exerciseMaps.isEmpty) {
       throw Exception('Exercise with ID $id not found');
     }
+
+    // Get sets for this exercise
+    final setMaps = await db.query(
+      'sets',
+      where: 'exercise_id = ?',
+      whereArgs: [id],
+      orderBy: 'order_num ASC',
+    );
+
+    // Convert maps to SetModel objects
+    final sets =
+        setMaps
+            .map(
+              (setMap) => SetModel(
+                id: setMap['id'] as String,
+                exerciseId: setMap['exercise_id'] as String,
+                order: setMap['order_num'] as int,
+                reps: setMap['reps'] as int,
+                weight: setMap['weight'] as int,
+                restSeconds: setMap['rest'] as int,
+              ),
+            )
+            .toList();
+
+    // Create and return the exercise with its sets
+    return ExerciseModel(
+      id: exerciseMaps.first['id'] as String,
+      name: exerciseMaps.first['name'] as String,
+      position: exerciseMaps.first['position'] as int,
+      sets: sets,
+    );
   }
 
   Future<List<ExerciseModel>> readAllExercises() async {
     final db = await instance.database;
-    // Order exercises by their position
-    final result = await db.query('exercises', orderBy: 'position ASC');
-    return result.map((json) => ExerciseModel.fromJson(json)).toList();
+
+    // Get all exercises ordered by position
+    final exerciseMaps = await db.query('exercises', orderBy: 'position ASC');
+
+    if (exerciseMaps.isEmpty) return [];
+
+    // Create a list to hold exercise models
+    List<ExerciseModel> exercises = [];
+
+    // For each exercise, get its sets
+    for (var exerciseMap in exerciseMaps) {
+      final exerciseId = exerciseMap['id'] as String;
+
+      // Get sets for this exercise
+      final setMaps = await db.query(
+        'sets',
+        where: 'exercise_id = ?',
+        whereArgs: [exerciseId],
+        orderBy: 'order_num ASC',
+      );
+
+      // Convert maps to SetModel objects
+      final sets =
+          setMaps
+              .map(
+                (setMap) => SetModel(
+                  id: setMap['id'] as String,
+                  exerciseId: setMap['exercise_id'] as String,
+                  order: setMap['order_num'] as int,
+                  reps: setMap['reps'] as int,
+                  weight: setMap['weight'] as int,
+                  restSeconds: setMap['rest'] as int,
+                ),
+              )
+              .toList();
+
+      // Create exercise with its sets
+      exercises.add(
+        ExerciseModel(
+          id: exerciseId,
+          name: exerciseMap['name'] as String,
+          position: exerciseMap['position'] as int,
+          sets: sets,
+        ),
+      );
+    }
+
+    return exercises;
   }
 
   Future<int> updateExercise(ExerciseModel exercise) async {
     final db = await instance.database;
-    return db.update(
-      'exercises',
-      exercise.toJson(),
-      where: 'id = ?',
-      whereArgs: [exercise.id],
-    );
+
+    int result = 0;
+    await db.transaction((txn) async {
+      // Update exercise data
+      result = await txn.update(
+        'exercises',
+        {'name': exercise.name, 'position': exercise.position},
+        where: 'id = ?',
+        whereArgs: [exercise.id],
+      );
+
+      // Delete existing sets
+      await txn.delete(
+        'sets',
+        where: 'exercise_id = ?',
+        whereArgs: [exercise.id],
+      );
+
+      // Insert updated sets
+      for (var s in exercise.sets) {
+        await txn.insert('sets', {
+          'id': s.id,
+          'exercise_id': exercise.id,
+          'order_num': s.order,
+          'reps': s.reps,
+          'weight': s.weight,
+          'rest': s.restSeconds,
+        });
+      }
+    });
+
+    return result;
   }
 
   Future<int> deleteExercise(String id) async {
     final db = await instance.database;
+
+    // Delete exercise and its sets (sets will be deleted automatically due to CASCADE)
     return await db.delete('exercises', where: 'id = ?', whereArgs: [id]);
   }
 
-  // CRUD operations for SessionModel
+  // CRUD operations for SetModel
+
+  Future<String> createSet(SetModel s) async {
+    final db = await instance.database;
+    await db.insert('sets', {
+      'id': s.id,
+      'exercise_id': s.exerciseId,
+      'order_num': s.order,
+      'reps': s.reps,
+      'weight': s.weight,
+      'rest': s.restSeconds,
+    });
+    return s.id;
+  }
+
+  Future<SetModel> readSet(String id) async {
+    final db = await instance.database;
+    final maps = await db.query('sets', where: 'id = ?', whereArgs: [id]);
+
+    if (maps.isNotEmpty) {
+      return SetModel(
+        id: maps.first['id'] as String,
+        exerciseId: maps.first['exercise_id'] as String,
+        order: maps.first['order_num'] as int,
+        reps: maps.first['reps'] as int,
+        weight: maps.first['weight'] as int,
+        restSeconds: maps.first['rest'] as int,
+      );
+    } else {
+      throw Exception('Set with ID $id not found');
+    }
+  }
+
+  Future<List<SetModel>> readSetsForExercise(String exerciseId) async {
+    final db = await instance.database;
+    final result = await db.query(
+      'sets',
+      where: 'exercise_id = ?',
+      whereArgs: [exerciseId],
+      orderBy: 'order_num ASC',
+    );
+
+    return result
+        .map(
+          (json) => SetModel(
+            id: json['id'] as String,
+            exerciseId: json['exercise_id'] as String,
+            order: json['order_num'] as int,
+            reps: json['reps'] as int,
+            weight: json['weight'] as int,
+            restSeconds: json['rest'] as int,
+          ),
+        )
+        .toList();
+  }
+
+  Future<int> updateSet(SetModel s) async {
+    final db = await instance.database;
+    return db.update(
+      'sets',
+      {
+        'exercise_id': s.exerciseId,
+        'order_num': s.order,
+        'reps': s.reps,
+        'weight': s.weight,
+        'rest': s.restSeconds,
+      },
+      where: 'id = ?',
+      whereArgs: [s.id],
+    );
+  }
+
+  Future<int> deleteSet(String id) async {
+    final db = await instance.database;
+    return await db.delete('sets', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // CRUD operations for SessionModel (modified to include sets in exercises)
 
   Future<String> createSession(SessionModel session) async {
     final db = await instance.database;
@@ -143,11 +388,11 @@ class DatabaseHelper {
         var exercise = session.exercises[i];
 
         // Ensure the exercise exists in the exercises table
-        await txn.insert(
-          'exercises',
-          exercise.toJson(),
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+        await txn.insert('exercises', {
+          'id': exercise.id,
+          'name': exercise.name,
+          'position': exercise.position,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
 
         // Create relationship in junction table with position
         await txn.insert('session_exercises', {
@@ -155,6 +400,18 @@ class DatabaseHelper {
           'exercise_id': exercise.id,
           'position': i, // Use index as position in session
         }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+        // Insert sets for this exercise
+        for (var s in exercise.sets) {
+          await txn.insert('sets', {
+            'id': s.id,
+            'exercise_id': exercise.id,
+            'order_num': s.order,
+            'reps': s.reps,
+            'weight': s.weight,
+            'rest': s.restSeconds,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        }
       }
     });
 
@@ -201,17 +458,49 @@ class DatabaseHelper {
     // Create a map to maintain the correct order of exercises
     final exercisesMap = <String, ExerciseModel>{};
 
-    // Get all exercises
-    final exerciseMaps = await db.query(
-      'exercises',
-      where: 'id IN (${List.filled(exerciseIds.length, '?').join(',')})',
-      whereArgs: exerciseIds,
-    );
+    // For each exercise, get its data and sets
+    for (var exerciseId in exerciseIds) {
+      // Get exercise data
+      final exerciseMaps = await db.query(
+        'exercises',
+        where: 'id = ?',
+        whereArgs: [exerciseId],
+      );
 
-    // Create a map of exercise id to exercise model
-    for (var exerciseMap in exerciseMaps) {
-      final exercise = ExerciseModel.fromJson(exerciseMap);
-      exercisesMap[exercise.id] = exercise;
+      if (exerciseMaps.isNotEmpty) {
+        // Get sets for this exercise
+        final setMaps = await db.query(
+          'sets',
+          where: 'exercise_id = ?',
+          whereArgs: [exerciseId],
+          orderBy: 'order_num ASC',
+        );
+
+        // Convert maps to SetModel objects
+        final sets =
+            setMaps
+                .map(
+                  (setMap) => SetModel(
+                    id: setMap['id'] as String,
+                    exerciseId: setMap['exercise_id'] as String,
+                    order: setMap['order_num'] as int,
+                    reps: setMap['reps'] as int,
+                    weight: setMap['weight'] as int,
+                    restSeconds: setMap['rest'] as int,
+                  ),
+                )
+                .toList();
+
+        // Create exercise with its sets
+        final exercise = ExerciseModel(
+          id: exerciseMaps.first['id'] as String,
+          name: exerciseMaps.first['name'] as String,
+          position: exerciseMaps.first['position'] as int,
+          sets: sets,
+        );
+
+        exercisesMap[exerciseId] = exercise;
+      }
     }
 
     // Create ordered list of exercises using the order from the junction table
@@ -262,26 +551,50 @@ class DatabaseHelper {
                 .map((rel) => rel['exercise_id'] as String)
                 .toList();
 
-        // Get exercises data
-        final exerciseMaps = await db.query(
-          'exercises',
-          where: 'id IN (${List.filled(exerciseIds.length, '?').join(',')})',
-          whereArgs: exerciseIds,
-        );
+        // For each exercise, get its data and sets
+        for (var exerciseId in exerciseIds) {
+          // Get exercise data
+          final exerciseMaps = await db.query(
+            'exercises',
+            where: 'id = ?',
+            whereArgs: [exerciseId],
+          );
 
-        // Create a map of exercise id to exercise model
-        final exercisesMap = <String, ExerciseModel>{};
-        for (var exerciseMap in exerciseMaps) {
-          final exercise = ExerciseModel.fromJson(exerciseMap);
-          exercisesMap[exercise.id] = exercise;
+          if (exerciseMaps.isNotEmpty) {
+            // Get sets for this exercise
+            final setMaps = await db.query(
+              'sets',
+              where: 'exercise_id = ?',
+              whereArgs: [exerciseId],
+              orderBy: 'order_num ASC',
+            );
+
+            // Convert maps to SetModel objects
+            final sets =
+                setMaps
+                    .map(
+                      (setMap) => SetModel(
+                        id: setMap['id'] as String,
+                        exerciseId: setMap['exercise_id'] as String,
+                        order: setMap['order_num'] as int,
+                        reps: setMap['reps'] as int,
+                        weight: setMap['weight'] as int,
+                        restSeconds: setMap['rest'] as int,
+                      ),
+                    )
+                    .toList();
+
+            // Create exercise with its sets
+            exercises.add(
+              ExerciseModel(
+                id: exerciseMaps.first['id'] as String,
+                name: exerciseMaps.first['name'] as String,
+                position: exerciseMaps.first['position'] as int,
+                sets: sets,
+              ),
+            );
+          }
         }
-
-        // Create ordered list of exercises
-        exercises =
-            exerciseIds
-                .map((id) => exercisesMap[id])
-                .whereType<ExerciseModel>()
-                .toList();
       }
 
       // Create session with its exercises
@@ -304,10 +617,24 @@ class DatabaseHelper {
     // Start a transaction
     int result = 0;
     await db.transaction((txn) async {
-      // Update session data
+      // First, get the current session to preserve its position
+      final currentSessionQuery = await txn.query(
+        'sessions',
+        columns: ['position'],
+        where: 'id = ?',
+        whereArgs: [session.id],
+      );
+
+      // If the session exists, get its current position
+      int currentPosition = 0;
+      if (currentSessionQuery.isNotEmpty) {
+        currentPosition = currentSessionQuery.first['position'] as int;
+      }
+
+      // Update session data while preserving the original position
       result = await txn.update(
         'sessions',
-        {'name': session.name, 'position': session.position},
+        {'name': session.name, 'position': currentPosition},
         where: 'id = ?',
         whereArgs: [session.id],
       );
@@ -324,11 +651,11 @@ class DatabaseHelper {
         var exercise = session.exercises[i];
 
         // Ensure exercise exists
-        await txn.insert(
-          'exercises',
-          exercise.toJson(),
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+        await txn.insert('exercises', {
+          'id': exercise.id,
+          'name': exercise.name,
+          'position': exercise.position,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
 
         // Add relationship with position
         await txn.insert('session_exercises', {
@@ -336,6 +663,25 @@ class DatabaseHelper {
           'exercise_id': exercise.id,
           'position': i, // Use index as position in session
         });
+
+        // Delete existing sets for this exercise
+        await txn.delete(
+          'sets',
+          where: 'exercise_id = ?',
+          whereArgs: [exercise.id],
+        );
+
+        // Insert updated sets
+        for (var s in exercise.sets) {
+          await txn.insert('sets', {
+            'id': s.id,
+            'exercise_id': exercise.id,
+            'order_num': s.order,
+            'reps': s.reps,
+            'weight': s.weight,
+            'rest': s.restSeconds,
+          });
+        }
       }
     });
 
@@ -358,11 +704,11 @@ class DatabaseHelper {
 
     await db.transaction((txn) async {
       // Ensure exercise exists
-      await txn.insert(
-        'exercises',
-        exercise.toJson(),
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await txn.insert('exercises', {
+        'id': exercise.id,
+        'name': exercise.name,
+        'position': exercise.position,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
 
       // Get the current max position for exercises in this session
       final maxPosResult = await txn.rawQuery(
@@ -377,6 +723,18 @@ class DatabaseHelper {
         'exercise_id': exercise.id,
         'position': maxPos + 1, // Add at the end
       }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+      // Insert sets for this exercise
+      for (var s in exercise.sets) {
+        await txn.insert('sets', {
+          'id': s.id,
+          'exercise_id': exercise.id,
+          'order_num': s.order,
+          'reps': s.reps,
+          'weight': s.weight,
+          'rest': s.restSeconds,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
     });
   }
 
@@ -494,6 +852,17 @@ class DatabaseHelper {
     final int maxPos = result.first['maxPos'] as int? ?? -1;
     return maxPos + 1;
   }
+
+  // Get the next available order number for sets in an exercise
+  // Future<int> getNextSetOrderForExercise(String exerciseId) async {
+  //   final db = await instance.database;
+  //   final result = await db.rawQuery(
+  //     'SELECT MAX(order_num) as maxOrder FROM sets WHERE exercise_id = ?',
+  //     [exerciseId],
+  //   );
+  //   final int maxOrder = result.first['maxOrder'] as int? ?? -1;
+  //   return maxOrder + 1;
+  // }
 
   // Close database
   Future close() async {

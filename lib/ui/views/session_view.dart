@@ -1,6 +1,7 @@
 // Expansion tiles with list tiles
 import 'package:flutter/material.dart';
 import 'package:o2_exercise/data/models/exercise_model.dart';
+import 'package:o2_exercise/data/models/set_model.dart';
 import 'package:o2_exercise/ui/widgets/exercise_input_widget.dart';
 import 'package:o2_exercise/utils/constants.dart';
 import 'package:uuid/uuid.dart';
@@ -30,6 +31,13 @@ class _SessionViewState extends State<SessionView> {
   void dispose() {
     _sessionNameController.dispose();
     super.dispose();
+  }
+
+  String repRange(List<SetModel> sets) {
+    if (sets.isEmpty) return '0';
+    final min = sets.map((s) => s.reps).reduce((a, b) => a < b ? a : b);
+    final max = sets.map((s) => s.reps).reduce((a, b) => a > b ? a : b);
+    return min == max ? '$min' : '$min-$max';
   }
 
   @override
@@ -106,6 +114,7 @@ class _SessionViewState extends State<SessionView> {
                     final exerciseNameController = TextEditingController(
                       text: exercise.name,
                     );
+
                     return Dismissible(
                       key: Key(exercise.id),
                       direction: DismissDirection.endToStart,
@@ -182,7 +191,7 @@ class _SessionViewState extends State<SessionView> {
                           style: TextStyle(color: white, fontSize: 16),
                         ),
                         subtitle: Text(
-                          '${exercise.sets} x ${exercise.reps} | ${exercise.weightKG}kg | ${exercise.restSeconds}s rest',
+                          '${exercise.sets.length} sets | ${repRange(exercise.sets)} reps',
                           style: TextStyle(color: Colors.grey),
                         ),
                         children: [
@@ -211,190 +220,195 @@ class _SessionViewState extends State<SessionView> {
                                   },
                                   onEditingComplete: () => setState(() {}),
                                 ),
-                                SizedBox(height: 16),
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        ExerciseInputWidget(
-                                          value: exercise.sets,
-                                          suffix: 'sets',
-                                          width: mediaWidth,
-                                          onTapPlus: () {
-                                            exercise.sets++;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                          onLongPressPlus: () {
-                                            exercise.sets += 10;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                          onTapMinus: () {
-                                            if (exercise.sets < 1) return;
-                                            exercise.sets--;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                          onLongPressMinus: () {
-                                            if (exercise.sets < 10) return;
-                                            exercise.sets -= 10;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
+
+                                for (var s in exercise.sets)
+                                  Dismissible(
+                                    key: Key(s.id),
+                                    direction: DismissDirection.endToStart,
+                                    onDismissed: (direction) {
+                                      // Remove from local state first (optimistic update)
+                                      setState(() {
+                                        exercise.sets.remove(s);
+                                        db.deleteSet(s.id).then((_) {
+                                          // After the database operation completes, refresh the UI
+                                          setState(() {});
+                                        });
+                                      });
+                                    },
+                                    background: Container(
+                                      color: Colors.red,
+                                      alignment: Alignment.centerRight,
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(
+                                          right: 16.0,
                                         ),
-                                        SizedBox(height: 16),
-                                        ExerciseInputWidget(
-                                          value: exercise.reps,
-                                          suffix: 'reps',
-                                          width: mediaWidth,
-                                          onTapPlus: () {
-                                            exercise.reps++;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                          onLongPressPlus: () {
-                                            exercise.reps += 10;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                          onTapMinus: () {
-                                            if (exercise.reps < 1) return;
-                                            exercise.reps--;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                          onLongPressMinus: () {
-                                            if (exercise.reps < 10) return;
-                                            exercise.reps -= 10;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
+                                        child: const Icon(
+                                          Icons.delete,
+                                          color: Colors.white,
                                         ),
-                                      ],
+                                      ),
                                     ),
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        ExerciseInputWidget(
-                                          value: exercise.weightKG,
-                                          suffix: 'kg',
-                                          width: mediaWidth,
-                                          onTapPlus: () {
-                                            exercise.weightKG++;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                          onLongPressPlus: () {
-                                            exercise.weightKG += 10;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                          onTapMinus: () {
-                                            if (exercise.weightKG < 1) return;
-                                            exercise.weightKG--;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                          onLongPressMinus: () {
-                                            if (exercise.weightKG < 10) return;
-                                            exercise.weightKG -= 10;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                        ),
-                                        SizedBox(height: 16),
-                                        ExerciseInputWidget(
-                                          value: exercise.restSeconds,
-                                          suffix: 's',
-                                          width: mediaWidth,
-                                          onTapPlus: () {
-                                            exercise.restSeconds += 5;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                          onLongPressPlus: () {
-                                            exercise.restSeconds += 30;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                          onTapMinus: () {
-                                            if (exercise.restSeconds < 5)
-                                              return;
-                                            exercise.restSeconds -= 5;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                          onLongPressMinus: () {
-                                            if (exercise.restSeconds < 30)
-                                              return;
-                                            exercise.restSeconds -= 30;
-                                            db.updateExercise(exercise).then((
-                                              _,
-                                            ) {
-                                              setState(() {});
-                                            });
-                                          },
-                                        ),
-                                      ],
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 8,
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          ExerciseInputWidget(
+                                            value: s.reps,
+                                            suffix: 'reps',
+                                            width: mediaWidth,
+                                            onTapPlus: () {
+                                              s.reps++;
+                                              db.updateExercise(exercise).then((
+                                                _,
+                                              ) {
+                                                setState(() {});
+                                              });
+                                            },
+                                            onLongPressPlus: () {
+                                              s.reps += 10;
+                                              db.updateExercise(exercise).then((
+                                                _,
+                                              ) {
+                                                setState(() {});
+                                              });
+                                            },
+                                            onTapMinus: () {
+                                              if (s.reps < 1) return;
+                                              s.reps--;
+                                              db.updateExercise(exercise).then((
+                                                _,
+                                              ) {
+                                                setState(() {});
+                                              });
+                                            },
+                                            onLongPressMinus: () {
+                                              if (s.reps < 10) return;
+                                              s.reps -= 10;
+                                              db.updateExercise(exercise).then((
+                                                _,
+                                              ) {
+                                                setState(() {});
+                                              });
+                                            },
+                                          ),
+                                          ExerciseInputWidget(
+                                            value: s.weight,
+                                            suffix: 'kg',
+                                            width: mediaWidth,
+                                            onTapPlus: () {
+                                              s.weight++;
+                                              db.updateExercise(exercise).then((
+                                                _,
+                                              ) {
+                                                setState(() {});
+                                              });
+                                            },
+                                            onLongPressPlus: () {
+                                              s.weight += 10;
+                                              db.updateExercise(exercise).then((
+                                                _,
+                                              ) {
+                                                setState(() {});
+                                              });
+                                            },
+                                            onTapMinus: () {
+                                              if (s.weight < 1) return;
+                                              s.weight--;
+                                              db.updateExercise(exercise).then((
+                                                _,
+                                              ) {
+                                                setState(() {});
+                                              });
+                                            },
+                                            onLongPressMinus: () {
+                                              if (s.weight < 10) return;
+                                              s.weight -= 10;
+                                              db.updateExercise(exercise).then((
+                                                _,
+                                              ) {
+                                                setState(() {});
+                                              });
+                                            },
+                                          ),
+
+                                          ExerciseInputWidget(
+                                            value: s.restSeconds,
+                                            suffix: 's',
+                                            width: mediaWidth,
+                                            onTapPlus: () {
+                                              s.restSeconds += 5;
+                                              db.updateExercise(exercise).then((
+                                                _,
+                                              ) {
+                                                setState(() {});
+                                              });
+                                            },
+                                            onLongPressPlus: () {
+                                              s.restSeconds += 30;
+                                              db.updateExercise(exercise).then((
+                                                _,
+                                              ) {
+                                                setState(() {});
+                                              });
+                                            },
+                                            onTapMinus: () {
+                                              if (s.restSeconds < 5) return;
+                                              s.restSeconds -= 5;
+                                              db.updateExercise(exercise).then((
+                                                _,
+                                              ) {
+                                                setState(() {});
+                                              });
+                                            },
+                                            onLongPressMinus: () {
+                                              if (s.restSeconds < 30) return;
+                                              s.restSeconds -= 30;
+                                              db.updateExercise(exercise).then((
+                                                _,
+                                              ) {
+                                                setState(() {});
+                                              });
+                                            },
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ],
+                                  ),
+
+                                // Add a new set
+                                InkWell(
+                                  borderRadius: BorderRadius.all(
+                                    Radius.circular(4),
+                                  ),
+                                  onTap: () {
+                                    final newSetId = const Uuid().v4();
+                                    final newSet = SetModel(
+                                      id: newSetId,
+                                      exerciseId: exercise.id,
+                                      order: exercise.sets.length,
+                                      reps: 0,
+                                      weight: 0,
+                                      restSeconds: 0,
+                                    );
+                                    exercise.sets.add(newSet);
+                                    db.updateExercise(exercise).then((_) {
+                                      setState(() {});
+                                    });
+                                  },
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.all(
+                                        Radius.circular(4),
+                                      ),
+                                    ),
+                                    width: mediaWidth - 32,
+                                    child: Icon(Icons.add, color: white),
+                                  ),
                                 ),
-                                SizedBox(height: 16),
                               ],
                             ),
                           ),
@@ -408,13 +422,11 @@ class _SessionViewState extends State<SessionView> {
       floatingActionButton: FloatingActionButton(
         child: const Icon(Icons.add),
         onPressed: () {
+          final newExerciseId = const Uuid().v4();
           final newExercise = ExerciseModel(
-            id: const Uuid().v4(),
+            id: newExerciseId,
             name: 'New Exercise',
-            sets: 3,
-            reps: 10,
-            weightKG: 0,
-            restSeconds: 90,
+            sets: [],
             position: widget.session.exercises.length,
           );
           widget.session.exercises.add(newExercise);
