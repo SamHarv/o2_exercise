@@ -63,6 +63,34 @@ class _SessionViewState extends State<SessionView> {
                 db.updateSession(widget.session);
               }),
         ),
+        actions: [
+          FloatingActionButton.small(
+            child: const Icon(Icons.add),
+            onPressed: () {
+              final newExerciseId = const Uuid().v4();
+              final newExercise = ExerciseModel(
+                id: newExerciseId,
+                name: 'New Exercise',
+                sets: [],
+                position: widget.session.exercises.length,
+              );
+              widget.session.exercises.add(newExercise);
+              List<String> exerciseIds =
+                  widget.session.exercises.map((e) => e.id).toList();
+              db.reorderExercisesInSession(widget.session.id, exerciseIds).then(
+                (_) {
+                  setState(() {});
+                },
+              );
+              db.createExercise(newExercise).then((_) {
+                setState(() {});
+              });
+              db.updateSession(widget.session).then((_) {
+                setState(() {});
+              });
+            },
+          ),
+        ],
         automaticallyImplyLeading: true,
         backgroundColor: black,
         foregroundColor: white,
@@ -419,32 +447,6 @@ class _SessionViewState extends State<SessionView> {
                   },
                 ),
               ),
-      floatingActionButton: FloatingActionButton(
-        child: const Icon(Icons.add),
-        onPressed: () {
-          final newExerciseId = const Uuid().v4();
-          final newExercise = ExerciseModel(
-            id: newExerciseId,
-            name: 'New Exercise',
-            sets: [],
-            position: widget.session.exercises.length,
-          );
-          widget.session.exercises.add(newExercise);
-          List<String> exerciseIds =
-              widget.session.exercises.map((e) => e.id).toList();
-          db.reorderExercisesInSession(widget.session.id, exerciseIds).then((
-            _,
-          ) {
-            setState(() {});
-          });
-          db.createExercise(newExercise).then((_) {
-            setState(() {});
-          });
-          db.updateSession(widget.session).then((_) {
-            setState(() {});
-          });
-        },
-      ),
     );
   }
 }

@@ -29,8 +29,8 @@ class ExerciseInputWidget extends StatefulWidget {
 class _ExerciseInputWidgetState extends State<ExerciseInputWidget> {
   @override
   Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: widget.width / 3 - 32),
+    return SizedBox(
+      // constraints: BoxConstraints(), //maxWidth: widget.width / 3 - 32),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -38,18 +38,18 @@ class _ExerciseInputWidgetState extends State<ExerciseInputWidget> {
             children: [
               Text(
                 '${widget.value}',
-                style: TextStyle(color: white, fontSize: 18),
+                style: TextStyle(color: white, fontSize: 14),
               ),
-              SizedBox(width: 8),
-              Text(widget.suffix, style: TextStyle(color: white, fontSize: 14)),
+              SizedBox(width: 4),
+              Text(widget.suffix, style: TextStyle(color: white, fontSize: 12)),
             ],
           ),
-          SizedBox(width: 16),
+          SizedBox(width: 8),
           Column(
             children: [
               SizedBox(
-                height: 25,
-                width: 25,
+                height: 40,
+                width: 40,
                 child: InkWell(
                   borderRadius: BorderRadius.vertical(
                     top: Radius.circular(8),
@@ -71,8 +71,8 @@ class _ExerciseInputWidgetState extends State<ExerciseInputWidget> {
                 ),
               ),
               SizedBox(
-                height: 25,
-                width: 25,
+                height: 40,
+                width: 40,
                 child: InkWell(
                   borderRadius: BorderRadius.vertical(
                     top: Radius.circular(0),
